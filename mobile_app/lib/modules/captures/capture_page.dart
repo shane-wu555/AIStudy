@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mobile_app/widgets/three_d_visualization_widget.dart';
 import 'capture_service.dart';
+import 'models/guidance_flow.dart';
+import 'models/guidance_step.dart';
 
 /// 拍照/语音/文本采集模块 - UC03 多模态采集
 /// 支持拍照、语音录制、文本输入三种方式
@@ -17,6 +20,8 @@ class _CapturePageState extends State<CapturePage> {
 
   bool _isRecording = false;
   String? _capturedImagePath;
+  GuidanceFlow? _guidanceFlow;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -26,23 +31,43 @@ class _CapturePageState extends State<CapturePage> {
 
   /// 拍照采集
   Future<void> _capturePhoto() async {
-    final imagePath = await _captureService.capturePhoto();
-    if (imagePath != null) {
-      setState(() {
-        _capturedImagePath = imagePath;
-      });
-      _showSnackBar('照片已采集');
+    setState(() {
+      _isLoading = true;
+    });
+
+    final guidance = await _captureService.capturePhotoAndGuide(
+      userId: 'demo_user',
+    );
+
+    setState(() {
+      _isLoading = false;
+      _capturedImagePath = null;
+      _guidanceFlow = guidance;
+    });
+
+    if (guidance != null) {
+      _showSnackBar('已生成导学步骤');
     }
   }
 
   /// 从相册选择
   Future<void> _pickFromGallery() async {
-    final imagePath = await _captureService.pickFromGallery();
-    if (imagePath != null) {
-      setState(() {
-        _capturedImagePath = imagePath;
-      });
-      _showSnackBar('图片已选择');
+    setState(() {
+      _isLoading = true;
+    });
+
+    final guidance = await _captureService.pickFromGalleryAndGuide(
+      userId: 'demo_user',
+    );
+
+    setState(() {
+      _isLoading = false;
+      _capturedImagePath = null;
+      _guidanceFlow = guidance;
+    });
+
+    if (guidance != null) {
+      _showSnackBar('已生成导学步骤');
     }
   }
 
@@ -70,10 +95,27 @@ class _CapturePageState extends State<CapturePage> {
   /// 提交文本
   void _submitText() {
     if (_textController.text.isNotEmpty) {
-      _captureService.submitText(_textController.text);
-      _showSnackBar('文本已提交');
-      _textController.clear();
+      _onSubmitTextForGuidance(_textController.text);
     }
+  }
+
+  Future<void> _onSubmitTextForGuidance(String text) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final guidance = await _captureService.submitTextForGuidance(
+      userId: 'demo_user',
+      text: text,
+    );
+
+    setState(() {
+      _isLoading = false;
+      _guidanceFlow = guidance;
+    });
+
+    _showSnackBar('已生成导学步骤');
+    _textController.clear();
   }
 
   void _showSnackBar(String message) {
@@ -91,6 +133,8 @@ class _CapturePageState extends State<CapturePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_isLoading) const LinearProgressIndicator(minHeight: 2),
+            if (_isLoading) const SizedBox(height: 8),
             // 图像采集区域
             Card(
               child: Padding(
@@ -105,17 +149,27 @@ class _CapturePageState extends State<CapturePage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    if (_capturedImagePath != null)
+                    if (_guidanceFlow == null)
                       Container(
-                        height: 200,
+                        height: 80,
+                        alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
+                          border: Border.all(color: Colors.grey.shade300),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Center(
-                          child: Icon(Icons.image, size: 100),
+                        child: Text(
+                          '拍照或选择图片后，系统会生成一步步的“导学流程”，\n帮助你理解题目，而不是直接给答案。',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
                         ),
                       ),
+                    if (_guidanceFlow != null) ...[
+                      const SizedBox(height: 8),
+                      _buildGuidanceSteps(),
+                    ],
                     const SizedBox(height: 16),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -205,5 +259,129 @@ class _CapturePageState extends State<CapturePage> {
         ),
       ),
     );
+  }
+
+  Widget _buildGuidanceSteps() {
+    final steps = _guidanceFlow?.steps ?? [];
+    if (steps.isEmpty) {
+      return Container();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '导学步骤',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: steps.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, index) {
+            final step = steps[index];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  leading: CircleAvatar(
+                    radius: 14,
+                    backgroundColor: Colors.blue.shade50,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(fontSize: 12, color: Colors.blue),
+                    ),
+                  ),
+                  title: Text(
+                    step.title,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: step.hint != null
+                      ? Text(
+                          step.hint!,
+                          style: TextStyle(color: Colors.grey.shade700),
+                        )
+                      : null,
+                  trailing: TextButton(
+                    onPressed: () {
+                      _followUpOnStep(step);
+                    },
+                    child: const Text('追问'),
+                  ),
+                ),
+                if (step.geometry != null)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      left: 16,
+                      right: 16,
+                      bottom: 4,
+                    ),
+                    child: SizedBox(
+                      height: 160,
+                      child: ThreeDVisualizationWidget(
+                        visualizationType: 'geometry',
+                        parameters: _normalizeGeometryParameters(step),
+                        focusStepId: step.stepId,
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Map<String, dynamic> _normalizeGeometryParameters(dynamic step) {
+    final raw = step.geometry as Map<String, dynamic>;
+
+    if (raw['objects'] is List) {
+      // 如果后端已经返回标准结构，直接透传
+      return raw;
+    }
+
+    // 否则，将单个几何对象包装成 objects 列表，并补充 step_id
+    final enriched = Map<String, dynamic>.from(raw);
+    enriched['step_id'] = step.stepId;
+
+    return {
+      'objects': [enriched],
+    };
+  }
+
+  Future<void> _followUpOnStep(GuidanceStep step) async {
+    final flow = _guidanceFlow;
+    if (flow == null) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final newFlow = await _captureService.followUpOnStep(
+        userId: 'demo_user',
+        sessionId: flow.sessionId,
+        stepId: step.stepId,
+      );
+
+      setState(() {
+        _guidanceFlow = newFlow;
+        _isLoading = false;
+      });
+
+      _showSnackBar('已根据步骤 ${step.stepId} 更新导学');
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showSnackBar('步骤追问失败，请稍后重试');
+    }
   }
 }

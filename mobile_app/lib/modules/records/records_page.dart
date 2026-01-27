@@ -242,7 +242,18 @@ class _RecordsPageState extends State<RecordsPage>
                     height: 220,
                     child: ThreeDVisualizationWidget(
                       visualizationType: 'geometry',
-                      parameters: <String, dynamic>{},
+                      parameters: <String, dynamic>{
+                        'objects': [
+                          {
+                            'type': 'line',
+                            'coords': [
+                              [0.0, 0.0, 0.0],
+                              [1.0, 1.0, 1.0],
+                            ],
+                            'label': '辅助线 AC',
+                          },
+                        ],
+                      },
                     ),
                   ),
                 ],

@@ -72,12 +72,13 @@ class ApiClient {
     }
   }
 
-  /// 上传文件
+  /// 上传文件（支持附加表单字段）
   Future<Map<String, dynamic>> uploadFile(
     String endpoint,
     String filePath,
-    String fieldName,
-  ) async {
+    String fieldName, {
+    Map<String, String>? fields,
+  }) async {
     try {
       var request = http.MultipartRequest(
         'POST',
@@ -86,6 +87,9 @@ class ApiClient {
 
       request.headers.addAll(_getHeaders());
       request.files.add(await http.MultipartFile.fromPath(fieldName, filePath));
+      if (fields != null && fields.isNotEmpty) {
+        request.fields.addAll(fields);
+      }
 
       final streamedResponse = await request.send().timeout(timeout);
       final response = await http.Response.fromStream(streamedResponse);

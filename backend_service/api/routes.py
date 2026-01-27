@@ -3,7 +3,7 @@
 提供移动端所需的各种API接口
 """
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 
 router = APIRouter()
@@ -22,6 +22,7 @@ class SessionMessage(BaseModel):
     session_id: Optional[str] = None
     user_id: str
     content: str
+    step_id: Optional[str] = None  # 针对某一步骤的追问
 
 
 class SessionResponse(BaseModel):
@@ -32,19 +33,81 @@ class SessionResponse(BaseModel):
     reasoning: Optional[str] = None
 
 
+def _demo_geometry_steps_from_text(content: str) -> List[Dict[str, Any]]:
+    """根据文本问题构造一个演示用的导学步骤列表（包含几何数据）"""
+
+    return [
+        {
+            "step_id": "step_understand_problem",
+            "title": "读题并提取关键信息",
+            "hint": content or "请先通读题目，划出已知量和待求量。",
+            "type": "understand",
+        },
+        {
+            "step_id": "step_draw_helper_line",
+            "title": "画出辅助线 AC，建立空间直观",
+            "hint": "在三角形中添加辅助线 AC，帮助观察角度与边长关系。",
+            "type": "geometry",
+            "geometry": {
+                "objects": [
+                    {
+                        "type": "line",
+                        "coords": [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
+                        "label": "辅助线 AC",
+                        "step_id": "step_draw_helper_line",
+                    },
+                    {
+                        "type": "point",
+                        "coords": [[0.0, 0.0, 0.0]],
+                        "label": "点 A",
+                        "step_id": "step_draw_helper_line",
+                    },
+                    {
+                        "type": "face",
+                        "coords": [
+                            [0.0, 0.0, 0.0],
+                            [1.0, 0.0, 0.0],
+                            [1.0, 1.0, 0.0],
+                        ],
+                        "label": "三角形 ABC 所在平面",
+                        "step_id": "step_draw_helper_line",
+                    },
+                ]
+            },
+        },
+        {
+            "step_id": "step_solve",
+            "title": "分步推导并给出中间结论",
+            "hint": "先求出关键角或边，再代入原式，避免一次性跳到最终答案。",
+            "type": "solve",
+        },
+    ]
+
+
 # ============ 采集接口 ============
 @router.post("/api/capture/text")
 async def capture_text(request: CaptureRequest):
-    """
-    文本采集接口
-    UC03: 多模态采集 - 文本输入
-    """
-    # TODO: 调用AI引擎处理文本
-    return {
-        "success": True,
-        "capture_id": "capture_123",
-        "message": "文本采集成功"
-    }
+        """文本采集接口，返回导学步骤结构而不是单一长文本。
+
+        前端期望结构：
+        {
+            "session_id": "session_xxx",
+            "task_id": "capture_123",
+            "steps": [
+                {"step_id": "...", "title": "...", "hint": "...", "type": "...", "geometry": {...}}
+            ]
+        }
+        """
+
+        # TODO: 这里可以接入真正的 AI 引擎
+        session_id = f"session_{request.user_id}_text"
+        steps = _demo_geometry_steps_from_text(request.content)
+
+        return {
+                "session_id": session_id,
+                "task_id": "capture_text_001",
+                "steps": steps,
+        }
 
 
 @router.post("/api/capture/image")
@@ -96,27 +159,36 @@ async def capture_audio(
 
 
 # ============ 会话接口 ============
-@router.post("/api/session/message", response_model=SessionResponse)
+@router.post("/api/session/message")
 async def send_message(message: SessionMessage):
+    """发送会话消息并返回导学结构化结果。
+
+    当前实现为 Demo：
+    - 如果 message.step_id 存在，则在对应步骤基础上做「放大讲解」。
+    - 返回结构与 /api/capture/text 一致，便于前端直接用 GuidanceFlow 解析。
     """
-    发送会话消息
-    UC04: 智能导学对话
-    """
-    # TODO:
-    # 1. 获取或创建会话
-    # 2. 保存用户消息
-    # 3. 调用AI引擎生成回复
-    # 4. 保存AI回复
-    # 5. 返回响应
-    
+
     session_id = message.session_id or f"session_{message.user_id}_001"
-    
-    return SessionResponse(
-        session_id=session_id,
-        message_id="msg_001",
-        content="这是AI导学助手的回复。实际应用中会调用LLM生成智能回复。",
-        reasoning="推理链: 问题理解 → 知识检索 → 答案生成"
-    )
+
+    base_steps = _demo_geometry_steps_from_text(message.content)
+
+    # 如果是针对某一步骤的追问，可以在这里根据 step_id 精细化该步
+    if message.step_id:
+        focus_label = f"针对 {message.step_id} 的详细讲解"
+        base_steps.append(
+            {
+                "step_id": f"{message.step_id}_detail",
+                "title": focus_label,
+                "hint": "这里可以由 LLM 生成更细致的分步提示与几何说明。",
+                "type": "detail",
+            }
+        )
+
+    return {
+        "session_id": session_id,
+        "task_id": f"session_task_{session_id}",
+        "steps": base_steps,
+    }
 
 
 @router.get("/api/session/history/{session_id}")
