@@ -9,6 +9,7 @@ import uvicorn
 from multimodal_parser.parser import multimodal_parser, MultimodalInput, ModalityType
 from reasoning_chain.engine import reasoning_engine
 from knowledge_base.manager import knowledge_manager
+from guidance_generator import guidance_generator
 
 
 app = FastAPI(
@@ -89,9 +90,55 @@ async def root():
         "capabilities": [
             "multimodal_parsing",
             "reasoning_chain",
-            "knowledge_retrieval"
+            "knowledge_retrieval",
+            "guidance_generation"
         ]
     }
+
+
+@app.post("/api/guidance/generate")
+async def generate_guidance(data: dict):
+    """
+    生成导学步骤（含几何数据）
+    
+    请求格式:
+    {
+        "user_id": "demo_user",
+        "content": "求解三角形 ABC 的面积",
+        "session_id": "session_xxx",  # 可选，追问时提供
+        "step_id": "step_draw_diagram"  # 可选，针对某一步追问时提供
+    }
+    
+    返回格式:
+    {
+        "session_id": "...",
+        "task_id": "...",
+        "steps": [
+            {
+                "step_id": "...",
+                "title": "...",
+                "hint": "...",
+                "type": "...",
+                "geometry": {
+                    "objects": [...]
+                }
+            }
+        ]
+    }
+    """
+    user_id = data.get("user_id", "default_user")
+    content = data.get("content", "")
+    session_id = data.get("session_id")
+    step_id = data.get("step_id")
+    
+    result = await guidance_generator.generate_guidance_steps(
+        user_id=user_id,
+        content=content,
+        session_id=session_id,
+        step_id=step_id,
+    )
+    
+    return result
 
 
 if __name__ == "__main__":

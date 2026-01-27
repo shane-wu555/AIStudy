@@ -5,8 +5,12 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
+import httpx
 
 router = APIRouter()
+
+# AI引擎服务地址
+AI_ENGINE_URL = "http://localhost:8001"
 
 
 # ============ 数据模型 ============
@@ -87,29 +91,39 @@ def _demo_geometry_steps_from_text(content: str) -> List[Dict[str, Any]]:
 # ============ 采集接口 ============
 @router.post("/api/capture/text")
 async def capture_text(request: CaptureRequest):
-        """文本采集接口，返回导学步骤结构而不是单一长文本。
+    """文本采集接口，调用 AI 引擎生成导学步骤（含几何数据）。
 
-        前端期望结构：
-        {
-            "session_id": "session_xxx",
-            "task_id": "capture_123",
-            "steps": [
-                {"step_id": "...", "title": "...", "hint": "...", "type": "...", "geometry": {...}}
-            ]
-        }
-        """
+    前端期望结构：
+    {
+      "session_id": "session_xxx",
+      "task_id": "capture_123",
+      "steps": [
+        {"step_id": "...", "title": "...", "hint": "...", "type": "...", "geometry": {...}}
+      ]
+    }
+    """
 
-        # TODO: 这里可以接入真正的 AI 引擎
-        session_id = f"session_{request.user_id}_text"
-        steps = _demo_geometry_steps_from_text(request.content)
-
-        return {
-                "session_id": session_id,
-                "task_id": "capture_text_001",
-                "steps": steps,
-        }
-
-
+    try:
+        # 调用 AI 引擎生成导学步骤
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{AI_ENGINE_URL}/api/guidance/generate",
+                json={
+                    "user_id": request.user_id,
+                    "content": request.content,
+                }
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                # AI 引擎调用失败，返回降级方案
+                return _fallback_guidance_steps(request.content, request.user_id)
+                
+    except Exception as e:
+        print(f"调用 AI 引擎失败: {e}")
+        # 降级到本地 Demo 数据
+        return _fallback_guidance_steps(request.content, request.user_id)
 @router.post("/api/capture/image")
 async def capture_image(
     user_id: str,
@@ -163,30 +177,63 @@ async def capture_audio(
 async def send_message(message: SessionMessage):
     """发送会话消息并返回导学结构化结果。
 
-    当前实现为 Demo：
+    当前实现：
     - 如果 message.step_id 存在，则在对应步骤基础上做「放大讲解」。
-    - 返回结构与 /api/capture/text 一致，便于前端直接用 GuidanceFlow 解析。
+    - 调用 AI 引擎生成步骤，返回结构与 /api/capture/text 一致，便于前端直接用 GuidanceFlow 解析。
     """
 
-    session_id = message.session_id or f"session_{message.user_id}_001"
+    try:
+        # 调用 AI 引擎生成导学步骤
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{AI_ENGINE_URL}/api/guidance/generate",
+                json={
+                    "user_id": message.user_id,
+                    "content": message.content,
+                    "session_id": message.session_id,
+                    "step_id": message.step_id,
+                }
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                # AI 引擎调用失败，返回降级方案
+                session_id = message.session_id or f"session_{message.user_id}_001"
+                return _fallback_guidance_steps(message.content, message.user_id, session_id, message.step_id)
+                
+    except Exception as e:
+        print(f"调用 AI 引擎失败: {e}")
+        # 降级到本地 Demo 数据
+        session_id = message.session_id or f"session_{message.user_id}_001"
+        return _fallback_guidance_steps(message.content, message.user_id, session_id, message.step_id)
 
-    base_steps = _demo_geometry_steps_from_text(message.content)
 
-    # 如果是针对某一步骤的追问，可以在这里根据 step_id 精细化该步
-    if message.step_id:
-        focus_label = f"针对 {message.step_id} 的详细讲解"
-        base_steps.append(
-            {
-                "step_id": f"{message.step_id}_detail",
-                "title": focus_label,
-                "hint": "这里可以由 LLM 生成更细致的分步提示与几何说明。",
-                "type": "detail",
-            }
-        )
-
+def _fallback_guidance_steps(
+    content: str,
+    user_id: str,
+    session_id: Optional[str] = None,
+    step_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """降级方案：当 AI 引擎不可用时，返回本地生成的导学步骤"""
+    
+    if not session_id:
+        session_id = f"session_{user_id}_fallback"
+    
+    base_steps = _demo_geometry_steps_from_text(content)
+    
+    # 如果是追问某一步
+    if step_id:
+        base_steps.append({
+            "step_id": f"{step_id}_detail",
+            "title": f"针对「{step_id}」的详细提示",
+            "hint": "这里应该由 AI 引擎生成更细致的讲解，当前为降级数据。",
+            "type": "detail",
+        })
+    
     return {
         "session_id": session_id,
-        "task_id": f"session_task_{session_id}",
+        "task_id": f"fallback_{session_id}",
         "steps": base_steps,
     }
 
