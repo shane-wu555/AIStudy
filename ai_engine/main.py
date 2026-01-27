@@ -58,6 +58,54 @@ async def execute_reasoning(data: dict):
     return result
 
 
+@app.post("/api/reasoning/process")
+async def process_reasoning(data: dict):
+    """
+    处理推理请求（含visual_commands生成）
+    专门用于语音追问等场景
+    
+    请求格式:
+    {
+        "user_id": "demo_user",
+        "query": "如何连接辅助线AC？",
+        "context": [...],  # 可选，历史对话上下文
+        "domain": "geometry"  # math, geometry, physics等
+    }
+    
+    返回格式:
+    {
+        "answer": "首先连接AC，构造直角三角形...",
+        "reasoning_trace": [...],
+        "visual_commands": [
+            {"type": "draw_line", "from": "A", "to": "C", "color": "red", "animate": true}
+        ],
+        "confidence": 0.85
+    }
+    """
+    user_id = data.get("user_id", "default_user")
+    query = data.get("query", "")
+    context = data.get("context", [])
+    domain = data.get("domain", "general")
+    
+    # 执行推理
+    result = await reasoning_engine.reason(query, context, domain)
+    
+    # 提取visual_commands（从推理步骤中）
+    visual_commands = []
+    for step in result.get("reasoning_trace", []):
+        if step.get("type") == "reasoning":
+            step_result = step.get("result", {})
+            visual_commands.extend(step_result.get("visual_commands", []))
+    
+    return {
+        "answer": result.get("answer", ""),
+        "reasoning_trace": result.get("reasoning_trace", []),
+        "visual_commands": visual_commands,
+        "confidence": result.get("confidence", 0.0),
+        "chain_id": result.get("chain_id")
+    }
+
+
 @app.post("/api/knowledge/search")
 async def search_knowledge(data: dict):
     """

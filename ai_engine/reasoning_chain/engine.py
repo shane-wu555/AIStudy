@@ -221,9 +221,17 @@ class ReasoningEngine:
         knowledge: Dict,
         context: Optional[List[Dict]]
     ) -> Dict:
-        """生成推理过程"""
+        """生成推理过程（包含可视化指令）"""
         # TODO: 调用LLM生成推理
         # from backend_service.model_interface.model_service import model_service
+        
+        # 检测是否为几何题
+        is_geometry = "几何" in query or "三角形" in query or "四边形" in query or "立方体" in query
+        
+        visual_commands = []
+        if is_geometry:
+            # 为几何题生成可视化指令
+            visual_commands = self._generate_visual_commands(query, understanding)
         
         return {
             "steps": [
@@ -233,6 +241,7 @@ class ReasoningEngine:
                 "代入求根公式得到解"
             ],
             "method": "求根公式法",
+            "visual_commands": visual_commands,
             "confidence": 0.87
         }
     
@@ -241,15 +250,65 @@ class ReasoningEngine:
         reasoning: Dict,
         knowledge: Dict
     ) -> Dict:
-        """生成答案"""
+        """生成答案（包含可视化指令）"""
         # TODO: 基于推理和知识生成答案
         
         return {
             "content": "这道一元二次方程可以用求根公式求解...",
             "solution_steps": reasoning.get("steps", []),
+            "visual_commands": reasoning.get("visual_commands", []),
             "alternative_methods": [],
             "confidence": 0.90
         }
+    
+    def _generate_visual_commands(self, query: str, understanding: Dict) -> List[Dict]:
+        """生成几何可视化指令"""
+        commands = []
+        
+        # 简单示例：根据题目关键词生成可视化指令
+        # TODO: 实际应该使用LLM解析题目并生成精确的绘图指令
+        
+        if "连接" in query or "辅助线" in query:
+            # 添加辅助线绘制指令
+            commands.append({
+                "type": "draw_line",
+                "from": "A",
+                "to": "C",
+                "color": "red",
+                "animate": True,
+                "duration_ms": 1000,
+                "label": "辅助线AC"
+            })
+        
+        if "角" in query:
+            # 高亮角度
+            commands.append({
+                "type": "highlight_angle",
+                "points": ["A", "C", "B"],
+                "color": "yellow",
+                "opacity": 0.3
+            })
+        
+        if "三角形" in query:
+            # 绘制三角形
+            commands.append({
+                "type": "draw_polygon",
+                "points": ["A", "B", "C"],
+                "color": "blue",
+                "fill": True,
+                "opacity": 0.2
+            })
+        
+        if "标注" in query or "长度" in query:
+            # 添加标注
+            commands.append({
+                "type": "add_label",
+                "target": "AB",
+                "text": "长度 = x",
+                "position": "center"
+            })
+        
+        return commands
     
     def _calculate_overall_confidence(self, chain: ReasoningChain) -> float:
         """计算整体置信度"""

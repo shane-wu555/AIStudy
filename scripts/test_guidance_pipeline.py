@@ -152,6 +152,53 @@ async def test_guidance_via_backend():
             return None
 
 
+async def test_reasoning_visual_commands():
+    """测试 AI 推理接口返回的 visual_commands（几何辅助线闭环）"""
+    print("\n" + "="*60)
+    print("🧪 测试 5: 几何推理 visual_commands")
+    print("="*60)
+
+    payload = {
+        "user_id": "test_visual_geometry",
+        "query": "已知三角形 ABC，连接 AC 的中点 D 到 B，求证明相关几何关系。",
+        "domain": "geometry",
+        "context": [],
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(
+                "http://localhost:8001/api/reasoning/process",
+                json=payload,
+            )
+
+            result = response.json()
+            print(f"✅ 推理答案: {result.get('answer')}")
+
+            commands = result.get("visual_commands", [])
+            print(f"   • visual_commands 数量: {len(commands)}")
+
+            for i, cmd in enumerate(commands, 1):
+                print(f"\n   指令 {i}:")
+                print(f"      type: {cmd.get('type')}")
+                if cmd.get('type') == 'draw_line':
+                    print(
+                        f"      from: {cmd.get('from')}  ->  to: {cmd.get('to')}  color: {cmd.get('color')}"
+                    )
+                if cmd.get('type') == 'highlight_angle':
+                    print(f"      points: {cmd.get('points')}")
+
+            if not commands:
+                print("\n   ⚠️  未返回 visual_commands，请检查 ReasoningEngine._generate_visual_commands 逻辑。")
+
+            return result
+        except Exception as e:
+            print(f"❌ visual_commands 测试失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
 async def test_follow_up():
     """测试追问功能"""
     print("\n" + "="*60)
@@ -236,6 +283,9 @@ async def main():
     
     # 4. 测试追问
     await test_follow_up()
+
+    # 5. 测试几何 visual_commands
+    await test_reasoning_visual_commands()
     
     print("\n" + "="*60)
     print("🎉 测试完成！")

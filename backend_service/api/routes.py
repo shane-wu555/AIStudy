@@ -158,18 +158,131 @@ async def capture_audio(
     """
     语音采集接口
     UC03: 多模态采集 - 语音录制
+    支持语音追问功能
     """
-    # TODO:
-    # 1. 保存音频文件
-    # 2. 调用语音识别服务(ASR)
-    # 3. 返回文本结果
+    try:
+        # 读取音频文件
+        audio_data = await file.read()
+        
+        # TODO: 保存音频文件到临时目录
+        # audio_path = f"uploads/audio/{user_id}_{file.filename}"
+        
+        # 调用语音识别服务(ASR)
+        from backend_service.utils.multimodal_processor import AudioProcessor
+        transcription = AudioProcessor.transcribe_audio(audio_data, language="zh")
+        
+        # 将转录结果发送给AI引擎进行推理
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{AI_ENGINE_URL}/api/reasoning/process",
+                    json={
+                        "user_id": user_id,
+                        "query": transcription,
+                        "domain": "math",
+                    }
+                )
+                
+                if response.status_code == 200:
+                    reasoning_result = response.json()
+                else:
+                    reasoning_result = None
+        except Exception as e:
+            print(f"调用推理引擎失败: {e}")
+            reasoning_result = None
+        
+        return {
+            "success": True,
+            "capture_id": f"capture_audio_{user_id}",
+            "audio_url": f"/uploads/{file.filename}",
+            "transcription": transcription,
+            "reasoning": reasoning_result
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"语音处理失败: {str(e)}")
+
+
+@router.post("/api/capture/video")
+async def capture_video(
+    user_id: str,
+    file: UploadFile = File(...)
+):
+    """
+    视频采集接口 - 长视频一键萃取
+    UC03扩展: 视频内容分析和关键信息提取
     
-    return {
-        "success": True,
-        "capture_id": "capture_125",
-        "audio_url": f"/uploads/{file.filename}",
-        "transcription": "这是语音转文字的结果"
-    }
+    功能：
+    1. 提取关键帧
+    2. OCR识别每帧内容
+    3. 提取音频并转文字
+    4. 生成知识卡片
+    """
+    try:
+        # TODO: 保存视频文件
+        video_data = await file.read()
+        video_path = f"uploads/video/{user_id}_{file.filename}"
+        
+        # 调用视频处理器
+        from backend_service.utils.multimodal_processor import VideoProcessor
+        
+        # 分析视频内容
+        analysis = VideoProcessor.analyze_video_content(video_path)
+        
+        # 生成知识卡片
+        knowledge_cards = VideoProcessor.create_knowledge_cards_from_video(analysis)
+        
+        return {
+            "success": True,
+            "capture_id": f"capture_video_{user_id}",
+            "video_url": f"/uploads/{file.filename}",
+            "analysis": {
+                "frame_count": analysis.get("frame_count", 0),
+                "duration": "待实现",
+                "transcription": analysis.get("transcription"),
+                "detected_topics": analysis.get("detected_topics", []),
+            },
+            "knowledge_cards": knowledge_cards,
+            "key_moments": analysis.get("key_moments", [])
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"视频处理失败: {str(e)}")
+
+
+@router.post("/api/video/extract-frames")
+async def extract_video_frames(
+    user_id: str,
+    file: UploadFile = File(...),
+    interval_seconds: int = 5,
+    max_frames: int = 50
+):
+    """
+    从视频中提取关键帧
+    """
+    try:
+        from backend_service.utils.multimodal_processor import VideoProcessor
+        
+        video_path = f"uploads/video/{user_id}_{file.filename}"
+        frames = VideoProcessor.extract_key_frames(
+            video_path,
+            interval_seconds=interval_seconds,
+            max_frames=max_frames
+        )
+        
+        return {
+            "success": True,
+            "frame_count": len(frames),
+            "frames": [
+                {
+                    "timestamp": frame["timestamp"],
+                    "frame_number": frame["frame_number"],
+                    # 图像数据转base64供前端显示
+                    "thumbnail": "data:image/jpeg;base64,..."  # TODO: 实际编码
+                }
+                for frame in frames
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"帧提取失败: {str(e)}")
 
 
 # ============ 会话接口 ============
