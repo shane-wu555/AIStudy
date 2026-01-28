@@ -1,16 +1,36 @@
 """多模态数据预处理工具
 
-处理图像、音频、文本等多模态数据。
+处理图像、音频、文本、视频等多模态数据。
 
-注意：本模块中的 ASR/OCR 等能力可以按需接入第三方依赖，
-默认实现会在依赖不存在或调用失败时安全降级为占位结果，
-以保证整体服务稳定性。
+设计目标:
+- 默认依赖尽量轻量(如 opencv, pillow, pytesseract)
+- 所有外部依赖通过 try/except 包裹,在依赖缺失或运行失败时
+    自动降级为占位实现,保证服务稳定性
 """
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 import base64
 from io import BytesIO
 import os
 import tempfile
+
+
+def _safe_import_cv2():
+    """延迟导入 OpenCV,在依赖缺失时返回 None 而不是抛异常。"""
+    try:
+        import cv2  # type: ignore
+        return cv2
+    except Exception:
+        return None
+
+
+def _safe_import_pil_and_tesseract():
+    """延迟导入 Pillow 和 pytesseract。"""
+    try:
+        from PIL import Image  # type: ignore
+        import pytesseract  # type: ignore
+        return Image, pytesseract
+    except Exception:
+        return None, None
 
 
 class ImageProcessor:
@@ -21,14 +41,20 @@ class ImageProcessor:
         """
         调整图片大小
         """
-        # TODO: 使用Pillow进行图像处理
-        # from PIL import Image
-        # img = Image.open(BytesIO(image_data))
-        # img.thumbnail((max_width, max_height))
-        # output = BytesIO()
-        # img.save(output, format='JPEG', quality=85)
-        # return output.getvalue()
-        return image_data
+        Image, _ = _safe_import_pil_and_tesseract()
+        if Image is None:
+            # 无 Pillow 依赖时,直接返回原图
+            return image_data
+
+        try:
+            img = Image.open(BytesIO(image_data))
+            img.thumbnail((max_width, max_height))
+            output = BytesIO()
+            img.save(output, format="JPEG", quality=85)
+            return output.getvalue()
+        except Exception:
+            # 任意异常都降级为返回原图,避免中断主流程
+            return image_data
     
     @staticmethod
     def to_base64(image_data: bytes) -> str:
@@ -42,16 +68,24 @@ class ImageProcessor:
     
     @staticmethod
     def extract_text_from_image(image_data: bytes) -> str:
+        """从图片中提取文字(OCR)。
+
+        优先使用 Tesseract(OCR 引擎),在依赖缺失或识别失败时
+        安全降级为占位文本,避免影响主流程。
         """
-        从图片中提取文字（OCR）
-        TODO: 集成OCR引擎 (如 PaddleOCR, Tesseract)
-        """
-        # 示例: 使用PaddleOCR
-        # from paddleocr import PaddleOCR
-        # ocr = PaddleOCR(use_angle_cls=True, lang='ch')
-        # result = ocr.ocr(image_data)
-        # return "\n".join([line[1][0] for line in result[0]])
-        return "OCR提取的文本（待实现）"
+
+        Image, pytesseract = _safe_import_pil_and_tesseract()
+        if Image is None or pytesseract is None:
+            return "OCR提取的文本(占位,未安装 Pillow/pytesseract)"
+
+        try:
+            img = Image.open(BytesIO(image_data))
+            # 对 PPT / 课件截图,可以适当增强对比度/灰度化,此处保持简单实现
+            text = pytesseract.image_to_string(img, lang=os.getenv("OCR_LANG", "chi_sim+eng"))
+            cleaned = text.strip()
+            return cleaned or "(OCR 无有效结果)"
+        except Exception:
+            return "OCR提取的文本(运行时失败,已降级)"
 
 
 class AudioProcessor:
@@ -231,56 +265,74 @@ class VideoProcessor:
         video_path: str,
         interval_seconds: int = 5,
         max_frames: int = 50
-    ) -> list:
+    ) -> List[Dict]:
+        """从视频中提取关键帧(基于 OpenCV 的轻量实现)。
+
+        逻辑:
+        - 使用 `cv2.VideoCapture` 打开本地视频
+        - 按给定时间间隔(interval_seconds)抽帧
+        - 每一帧编码为 JPEG 字节流
+
+        在 opencv-python 未安装或视频无法打开时,自动降级为
+        伪造的占位帧列表,保证上层流程不崩溃。
         """
-        从视频中提取关键帧
-        
-        Args:
-            video_path: 视频文件路径
-            interval_seconds: 抽帧间隔（秒）
-            max_frames: 最大帧数
-            
-        Returns:
-            关键帧列表，每个元素包含时间戳和图像数据
-            
-        TODO: 使用 opencv-python 或 moviepy 实现
-        """
-        # 示例实现（需要安装 opencv-python）
-        # import cv2
-        # 
-        # frames = []
-        # cap = cv2.VideoCapture(video_path)
-        # fps = cap.get(cv2.CAP_PROP_FPS)
-        # frame_interval = int(fps * interval_seconds)
-        # 
-        # frame_count = 0
-        # while len(frames) < max_frames:
-        #     ret, frame = cap.read()
-        #     if not ret:
-        #         break
-        #     
-        #     if frame_count % frame_interval == 0:
-        #         # 编码为JPEG
-        #         _, buffer = cv2.imencode('.jpg', frame)
-        #         frames.append({
-        #             "timestamp": frame_count / fps,
-        #             "image_data": buffer.tobytes(),
-        #             "frame_number": frame_count
-        #         })
-        #     
-        #     frame_count += 1
-        # 
-        # cap.release()
-        # return frames
-        
-        return [
-            {
-                "timestamp": i * interval_seconds,
-                "image_data": b"",  # 占位
-                "frame_number": i * interval_seconds * 30  # 假设30fps
-            }
-            for i in range(min(10, max_frames))
-        ]
+
+        cv2 = _safe_import_cv2()
+        if cv2 is None:
+            # 降级: 返回占位帧,但包含合理的时间戳,方便前端联调
+            return [
+                {
+                    "timestamp": i * interval_seconds,
+                    "image_data": b"",  # 无实际图像
+                    "frame_number": i * interval_seconds * 30,
+                }
+                for i in range(min(10, max_frames))
+            ]
+
+        if not os.path.exists(video_path):
+            # 文件不存在时同样返回空列表,由调用方决定如何降级
+            return []
+
+        frames: List[Dict] = []
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return []
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        try:
+            fps = float(fps) if fps > 1e-6 else 25.0
+        except Exception:
+            fps = 25.0
+
+        frame_interval = max(int(fps * interval_seconds), 1)
+        frame_index = 0
+
+        try:
+            while len(frames) < max_frames:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if frame_index % frame_interval == 0:
+                    ok, buffer = cv2.imencode(".jpg", frame)
+                    if not ok:
+                        frame_index += 1
+                        continue
+
+                    timestamp = frame_index / fps
+                    frames.append(
+                        {
+                            "timestamp": float(timestamp),
+                            "image_data": buffer.tobytes(),
+                            "frame_number": int(frame_index),
+                        }
+                    )
+
+                frame_index += 1
+        finally:
+            cap.release()
+
+        return frames
     
     @staticmethod
     def extract_audio_from_video(video_path: str, output_path: str = None) -> str:
@@ -323,28 +375,46 @@ class VideoProcessor:
             }
         """
         frames = VideoProcessor.extract_key_frames(video_path)
-        
-        # TODO: 对每帧进行OCR
-        frame_texts = []
+
+        # 1) 对每个关键帧执行 OCR,提取 PPT / 白板中的文字
+        frame_texts: List[Dict] = []
+        aggregated_text_parts: List[str] = []
+
         for frame in frames:
-            # text = ImageProcessor.extract_text_from_image(frame['image_data'])
-            # frame_texts.append({
-            #     "timestamp": frame['timestamp'],
-            #     "text": text
-            # })
-            pass
-        
-        # TODO: 提取并转录音频
-        # audio_path = VideoProcessor.extract_audio_from_video(video_path)
-        # transcription = AudioProcessor.transcribe_audio(audio_path)
-        
+            image_bytes: bytes = frame.get("image_data") or b""
+            if not image_bytes:
+                continue
+
+            text = ImageProcessor.extract_text_from_image(image_bytes)
+            cleaned = TextProcessor.clean_text(text)
+            if cleaned:
+                frame_texts.append(
+                    {
+                        "timestamp": frame.get("timestamp", 0.0),
+                        "text": cleaned,
+                    }
+                )
+                aggregated_text_parts.append(cleaned)
+
+        aggregated_text = "\n".join(aggregated_text_parts)
+
+        # 2) (可选) 提取并转录音频 — 这里保持占位实现,方便后续接入 ASR
+        transcription = "视频音频转文字（占位,待接入 ASR）"
+
+        # 3) 简单基于文本抽取知识点关键词
+        detected_topics: List[str] = []
+        if aggregated_text:
+            structure = StructuredDataExtractor.extract_problem_structure(aggregated_text)
+            detected_topics = [str(t) for t in structure.get("topics", [])]
+
         return {
             "frames": frames,
             "frame_count": len(frames),
             "frame_texts": frame_texts,
-            "transcription": "视频音频转文字（待实现）",
-            "detected_topics": ["待实现"],
-            "key_moments": []
+            "aggregated_text": aggregated_text,
+            "transcription": transcription,
+            "detected_topics": detected_topics or ["待实现"],
+            "key_moments": [],
         }
     
     @staticmethod
@@ -355,27 +425,55 @@ class VideoProcessor:
         Returns:
             知识卡片列表，可以直接传给前端的 knowledge_card_widget
         """
-        cards = []
-        
-        # 从关键帧生成卡片
-        for i, frame in enumerate(video_analysis.get('frames', [])):
-            cards.append({
-                "id": f"frame_{i}",
-                "title": f"关键时刻 {i+1}",
-                "timestamp": frame.get('timestamp', 0),
-                "content": "从视频中提取的内容",
-                "type": "video_frame",
-                "thumbnail": frame.get('image_data'),
-            })
-        
-        # 从转录文本生成卡片
-        if video_analysis.get('transcription'):
-            cards.append({
-                "id": "transcription",
-                "title": "视频讲解内容",
-                "content": video_analysis['transcription'],
-                "type": "text",
-            })
-        
+        cards: List[Dict] = []
+
+        # 1) 从关键帧生成卡片: 每张卡片对应一个时间点,前端可用 timestamp 控制播放器跳转
+        frame_texts_by_ts: Dict[float, str] = {}
+        for ft in video_analysis.get("frame_texts", []):
+            ts = float(ft.get("timestamp", 0.0))
+            text = str(ft.get("text", ""))
+            # 同一时间戳多次识别时简单拼接
+            frame_texts_by_ts[ts] = (frame_texts_by_ts.get(ts, "") + " " + text).strip()
+
+        for i, frame in enumerate(video_analysis.get("frames", [])):
+            ts = float(frame.get("timestamp", 0.0))
+            raw_text = frame_texts_by_ts.get(ts, "")
+            preview = (raw_text[:120] + "...") if len(raw_text) > 120 else raw_text
+
+            cards.append(
+                {
+                    "id": f"frame_{i}",
+                    "title": f"关键时刻 {i + 1}",
+                    "timestamp": ts,
+                    # 内容为该时刻附近 PPT 文本摘要,前端可直接展示
+                    "content": preview or "从视频中提取的关键信息",
+                    "type": "video_frame",
+                    "thumbnail": frame.get("image_data"),
+                }
+            )
+
+        # 2) 从整体文本/转录生成一张总览卡片(知识卡片大纲)
+        aggregated_text = video_analysis.get("aggregated_text") or ""
+        if aggregated_text:
+            cards.append(
+                {
+                    "id": "outline",
+                    "title": "本节知识结构大纲",
+                    "content": aggregated_text,
+                    "type": "outline",
+                }
+            )
+
+        transcription = video_analysis.get("transcription")
+        if transcription:
+            cards.append(
+                {
+                    "id": "transcription",
+                    "title": "视频讲解逐字稿",
+                    "content": transcription,
+                    "type": "text",
+                }
+            )
+
         return cards
 

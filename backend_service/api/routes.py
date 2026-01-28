@@ -1,11 +1,19 @@
-"""
-后端服务 - RESTful API路由
-提供移动端所需的各种API接口
+"""后端服务 - RESTful API路由
+
+提供移动端所需的各种 API 接口,包括:
+- 多模态采集/导学
+- 会话与导学追问
+- 学习记录管理
 """
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import httpx
+
+from backend_service.service.records_service import (
+    records_service,
+    RecordType,
+)
 
 router = APIRouter()
 
@@ -382,54 +390,66 @@ async def clear_session(session_id: str):
 # ============ 学习记录接口 ============
 @router.get("/api/records/{user_id}")
 async def get_records(user_id: str, page: int = 1, page_size: int = 20):
+    """获取学习记录 - UC06 学习轨迹管理。
+
+    当前实现使用内存中的 RecordsService 作为简易存储,
+    生产环境可替换为数据库/Redis 实现,保持接口兼容。
     """
-    获取学习记录
-    UC06: 学习轨迹管理
-    """
-    # TODO: 从数据库查询学习记录
-    return {
-        "total": 100,
-        "page": page,
-        "page_size": page_size,
-        "records": [
-            {
-                "id": "record_001",
-                "title": "解决了一道数学题",
-                "description": "关于二次方程的求解",
-                "type": "practice",
-                "timestamp": "2026-01-27T09:00:00"
-            }
-        ]
-    }
+
+    result = records_service.get_records(
+        user_id=user_id,
+        page=page,
+        page_size=page_size,
+        record_type=None,
+    )
+    return result
 
 
 @router.get("/api/records/statistics/{user_id}")
 async def get_statistics(user_id: str):
-    """
-    获取学习统计数据
-    """
-    # TODO: 统计用户学习数据
-    return {
-        "study_days": 15,
-        "total_hours": 48,
-        "completed_problems": 127,
-        "mastered_topics": 23,
-        "recent_progress": [
-            {"date": "2026-01-27", "problems": 5, "time": 2.5}
-        ]
-    }
+    """获取学习统计数据。"""
+
+    return records_service.get_statistics(user_id)
 
 
 @router.post("/api/records")
-async def add_record(user_id: str, record_data: dict):
-    """
-    添加学习记录
-    """
-    # TODO: 保存学习记录到数据库
-    return {
-        "success": True,
-        "record_id": "record_new_001"
+async def add_record(user_id: str, record_data: Dict[str, Any]):
+    """添加学习记录。
+
+    约定请求体 record_data 结构:
+
+    ```json
+    {
+      "title": "看完三角形面积讲解",
+      "description": "视频学习到 02:35,剩余一半",
+      "type": "review",  // question/practice/review/achievement
+      "metadata": {
+        "video_id": "video_001",
+        "last_position": 155.2
+      }
     }
+    ```
+    """
+
+    title = str(record_data.get("title") or "学习记录")
+    description = str(record_data.get("description") or "")
+    type_str = str(record_data.get("type") or RecordType.QUESTION.value)
+    metadata = record_data.get("metadata") or {}
+
+    try:
+        record_type = RecordType(type_str)
+    except ValueError:
+        record_type = RecordType.QUESTION
+
+    record = records_service.add_record(
+        user_id=user_id,
+        title=title,
+        description=description,
+        record_type=record_type,
+        **metadata,
+    )
+
+    return {"success": True, "record": record.to_dict()}
 
 
 # ============ 健康检查 ============

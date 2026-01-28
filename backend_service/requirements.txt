@@ -16,10 +16,14 @@ websockets==12.0
 # transformers==4.36.2
 # torch==2.1.2
 
-# 图像处理
-# pillow==10.2.0
-# opencv-python==4.9.0.80
+# 图像处理 / OCR
+pillow==10.2.0
+opencv-python==4.9.0.80
+# 可选: 如果后续需要更强大的中英文OCR,可以启用 PaddleOCR
 # paddleocr==2.7.0.3
+
+# OCR
+pytesseract==0.3.10
 
 # 音频处理
 # whisper==1.1.10
