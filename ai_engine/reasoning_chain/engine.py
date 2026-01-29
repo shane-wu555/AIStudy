@@ -307,6 +307,29 @@ class ReasoningEngine:
                 "text": "长度 = x",
                 "position": "center"
             })
+
+        # 视觉引导响应: 当用户询问某个位置/底面时,生成 flash_polygon / change_color 等指令
+        # 示例语句: "底面是哪个?请在3D模型里闪烁一下。"
+        ask_location_keywords = ["在哪", "哪个", "哪一面", "哪里", "底面"]
+        need_flash = any(kw in query for kw in ask_location_keywords)
+
+        if need_flash:
+            # 简化示例: 默认将 ABCD 视为立方体底面,通过 flash_polygon 高亮
+            commands.append({
+                "type": "flash_polygon",
+                "points": ["A", "B", "C", "D"],
+                "color": "yellow",
+                "duration_ms": 1500,
+                "label": "底面ABCD",
+            })
+            # 可选: 再附加一条 change_color 指令,用于保持高亮颜色
+            commands.append({
+                "type": "change_color",
+                "target": "base_face",
+                "points": ["A", "B", "C", "D"],
+                "color": "yellow",
+                "label": "底面ABCD",
+            })
         
         return commands
     

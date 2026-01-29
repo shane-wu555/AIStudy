@@ -429,11 +429,16 @@ class VideoProcessor:
 
         # 1) 从关键帧生成卡片: 每张卡片对应一个时间点,前端可用 timestamp 控制播放器跳转
         frame_texts_by_ts: Dict[float, str] = {}
+        newton_second_law_ts: Optional[float] = None
         for ft in video_analysis.get("frame_texts", []):
             ts = float(ft.get("timestamp", 0.0))
             text = str(ft.get("text", ""))
             # 同一时间戳多次识别时简单拼接
             frame_texts_by_ts[ts] = (frame_texts_by_ts.get(ts, "") + " " + text).strip()
+
+            # 简单规则: 如果帧文本中出现 "牛顿第二定律" 等关键词,记录一个候选时间点
+            if ("牛顿第二定律" in text or "Newton" in text) and newton_second_law_ts is None:
+                newton_second_law_ts = ts
 
         for i, frame in enumerate(video_analysis.get("frames", [])):
             ts = float(frame.get("timestamp", 0.0))
@@ -472,6 +477,59 @@ class VideoProcessor:
                     "title": "视频讲解逐字稿",
                     "content": transcription,
                     "type": "text",
+                }
+            )
+
+        # 3) 物理场景示例: 为 "牛顿第二定律/受力分析" 构造一张带 3D 模型的演示卡片
+        if newton_second_law_ts is not None:
+            cards.append(
+                {
+                    "id": "physics_newton_second_law",
+                    "title": "牛顿第二定律: 受力分析模型",
+                    "timestamp": newton_second_law_ts,
+                    "content": "根据视频内容自动萃取的受力分析示意: 通过受力分解理解 F = ma。",
+                    "type": "physics_concept",
+                    # 前端 ThreeDVisualizationWidget 可使用的可视化配置
+                    "visualization_type": "geometry",
+                    "visualization_parameters": {
+                        # 一个简化的受力分析模型: 水平桌面上的小车,竖直向下的重力和向上的支持力
+                        "objects": [
+                            # 小车所在的水平面(抽象为一块面)
+                            {
+                                "type": "face",
+                                "coords": [
+                                    [-1.0, -0.2, 0.0],
+                                    [1.0, -0.2, 0.0],
+                                    [1.0, -0.4, 0.0],
+                                    [-1.0, -0.4, 0.0],
+                                ],
+                                "label": "桌面",
+                            },
+                            # 受力箭头(用线段近似)
+                            {
+                                "type": "line",
+                                "coords": [[0.0, 0.0, 0.0], [0.0, -0.6, 0.0]],
+                                "label": "重力 mg",
+                            },
+                            {
+                                "type": "line",
+                                "coords": [[0.0, -0.2, 0.0], [0.0, 0.4, 0.0]],
+                                "label": "支持力 N",
+                            },
+                        ]
+                    },
+                    # 额外的可视化指令,可让前端按步骤动态展示受力分解
+                    "visual_commands": [
+                        {
+                            "type": "draw_line",
+                            "from": "A",
+                            "to": "C",
+                            "color": "red",
+                            "animate": True,
+                            "step_id": "1",
+                            "label": "沿运动方向的合力",
+                        }
+                    ],
                 }
             )
 
