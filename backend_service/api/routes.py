@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import httpx
+import os
 
 from backend_service.service.records_service import (
     records_service,
@@ -226,9 +227,17 @@ async def capture_video(
     4. 生成知识卡片
     """
     try:
-        # TODO: 保存视频文件
+        # 保存视频文件到本地,供 OpenCV 等后续处理使用
         video_data = await file.read()
-        video_path = f"uploads/video/{user_id}_{file.filename}"
+        video_dir = os.path.join("uploads", "video")
+        os.makedirs(video_dir, exist_ok=True)
+        video_path = os.path.join(video_dir, f"{user_id}_{file.filename}")
+
+        try:
+            with open(video_path, "wb") as f:
+                f.write(video_data)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"视频保存失败: {e}")
         
         # 调用视频处理器
         from backend_service.utils.multimodal_processor import VideoProcessor
@@ -242,7 +251,8 @@ async def capture_video(
         return {
             "success": True,
             "capture_id": f"capture_video_{user_id}",
-            "video_url": f"/uploads/{file.filename}",
+            # 前端可按需拼接为完整访问地址
+            "video_url": f"/uploads/video/{user_id}_{file.filename}",
             "analysis": {
                 "frame_count": analysis.get("frame_count", 0),
                 "duration": "待实现",
@@ -268,8 +278,20 @@ async def extract_video_frames(
     """
     try:
         from backend_service.utils.multimodal_processor import VideoProcessor
-        
-        video_path = f"uploads/video/{user_id}_{file.filename}"
+        import base64
+
+        # 保存上传的视频到与 capture_video 相同的目录
+        video_data = await file.read()
+        video_dir = os.path.join("uploads", "video")
+        os.makedirs(video_dir, exist_ok=True)
+        video_path = os.path.join(video_dir, f"{user_id}_{file.filename}")
+
+        try:
+            with open(video_path, "wb") as f:
+                f.write(video_data)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"视频保存失败: {e}")
+
         frames = VideoProcessor.extract_key_frames(
             video_path,
             interval_seconds=interval_seconds,
@@ -283,8 +305,14 @@ async def extract_video_frames(
                 {
                     "timestamp": frame["timestamp"],
                     "frame_number": frame["frame_number"],
-                    # 图像数据转base64供前端显示
-                    "thumbnail": "data:image/jpeg;base64,..."  # TODO: 实际编码
+                    # 图像数据转 base64 供前端显示
+                    "thumbnail": (
+                        "data:image/jpeg;base64,"
+                        + base64.b64encode(frame.get("image_data", b""))
+                        .decode("utf-8")
+                        if frame.get("image_data")
+                        else ""
+                    ),
                 }
                 for frame in frames
             ]
